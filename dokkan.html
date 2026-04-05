@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>どっかん（読完）</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+      background: #F5F3EE;
+      color: #1a1a1a;
+    }
+    .kanban-scroll {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      padding: 20px;
+      min-height: calc(100vh - 68px);
+      align-items: flex-start;
+    }
+    .column {
+      flex-shrink: 0;
+      width: 268px;
+      border-radius: 14px;
+      padding: 14px;
+      border: 1.5px solid transparent;
+    }
+    .column-drop-active {
+      outline: 2px dashed #818cf8;
+      outline-offset: -2px;
+    }
+    .book-card {
+      border-radius: 10px;
+      background: white;
+      margin-bottom: 10px;
+      cursor: grab;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      display: flex;
+      gap: 10px;
+      padding: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      user-select: none;
+    }
+    .book-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+    }
+    .book-card.dragging { opacity: 0.45; cursor: grabbing; }
+    .book-cover {
+      width: 50px;
+      height: 70px;
+      object-fit: contain;
+      border-radius: 5px;
+      flex-shrink: 0;
+      background: #f3f4f6;
+      image-rendering: auto;
+    }
+    .book-cover-placeholder {
+      width: 50px;
+      height: 70px;
+      border-radius: 5px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+      backdrop-filter: blur(2px);
+    }
+    .modal {
+      background: white;
+      border-radius: 18px;
+      padding: 26px;
+      width: 100%;
+      max-width: 560px;
+      max-height: 88vh;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+    }
+    .search-result-row {
+      display: flex;
+      gap: 12px;
+      padding: 10px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background 0.12s;
+      align-items: flex-start;
+    }
+    .search-result-row:hover { background: #f5f3ee; }
+    .step-box {
+      background: #f8f7f4;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .step-num {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: #6366f1; color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; flex-shrink: 0;
+    }
+    input, textarea, button { font-family: inherit; }
+    input { outline: none; }
+    input:focus, textarea:focus { border-color: #818cf8 !important; }
+    textarea { outline: none; resize: vertical; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+    .star-btn { cursor: pointer; font-size: 20px; line-height: 1; background: none; border: none; padding: 0 2px; }
+    .btn-primary {
+      background: #6366f1; color: white; border: none;
+      border-radius: 9px; padding: 10px 20px;
+      font-weight: 600; font-size: 14px; cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-ghost {
+      background: none; border: 1.5px solid #e5e7eb;
+      border-radius: 9px; padding: 10px 16px;
+      font-size: 14px; color: #6b7280; cursor: pointer;
+    }
+    .btn-ghost:hover { border-color: #d1d5db; }
+    .tag-btn {
+      padding: 5px 13px; border-radius: 20px; border: 1.5px solid;
+      cursor: pointer; font-size: 13px; transition: all 0.12s;
+    }
+    .progress-bar-bg {
+      height: 3px; background: #f0ede8; border-radius: 99px; overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%; border-radius: 99px; transition: width 0.4s;
+      background: linear-gradient(90deg, #818cf8, #6366f1);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── UTILS ───────────────────────────────────────────────────
+
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function useLocalStorage(key, init) {
+  const [val, setVal] = useState(() => {
+    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : init; }
+    catch { return init; }
+  });
+  const set = useCallback((v) => {
+    const next = v instanceof Function ? v(val) : v;
+    setVal(next);
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch {}
+  }, [val]);
+  return [val, set];
+}
+
+async function searchGoogleBooks(q) {
+  try {
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=10`);
+    const d = await r.json();
+    return (d.items || []).map(item => {
+      const v = item.volumeInfo || {};
+      return {
+        title: v.title || '不明',
+        author: (v.authors || []).join('・') || '',
+        cover: v.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
+        isbn: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_13')?.identifier || '',
+        publisher: v.publisher || '',
+        publishedDate: (v.publishedDate || '').slice(0, 4),
+        description: v.description || '',
+      };
+    });
+  } catch { return []; }
+}
+
+// タイトル＋著者から表紙URLを取得（複数APIを順番に試す）
+async function fetchCoverUrl(title, author) {
+  const clean = (s) => s.replace(/【[^】]*】|（[^）]*）|\([^)]*\)|\s*(第?\d+巻?|[（(]?\d+[)）]?)\s*$/g, '').trim();
+  const shortTitle = clean(title);
+
+  // ① Google Books（英語・国際書籍）
+  try {
+    const q = encodeURIComponent((shortTitle || title) + (author ? ' ' + author : ''));
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=5`);
+    const d = await r.json();
+    for (const item of (d.items || [])) {
+      const cover = item.volumeInfo?.imageLinks?.thumbnail?.replace('http:', 'https:');
+      if (cover) return cover;
+    }
+  } catch(e) {}
+
+  // ② OpenBD（日本語書籍専用・無料API）
+  try {
+    const q = encodeURIComponent(shortTitle || title);
+    const r = await fetch(`https://api.openbd.jp/v1/search?title=${q}&limit=5`);
+    const d = await r.json();
+    for (const item of (d || [])) {
+      const cover = item?.summary?.cover;
+      if (cover) return cover.replace('http:', 'https:');
+    }
+  } catch(e) {}
+
+  return null;
+}
+
+// ─── GENRE / SERIES ───────────────────────────────────────────
+
+const GENRES = [
+  { key: 'マンガ',    color: '#FEE2E2', text: '#B91C1C', border: '#FECACA' },
+  { key: '小説',      color: '#EDE9FE', text: '#6D28D9', border: '#DDD6FE' },
+  { key: 'ビジネス',  color: '#DBEAFE', text: '#1D4ED8', border: '#BFDBFE' },
+  { key: '技術・IT', color: '#D1FAE5', text: '#065F46', border: '#A7F3D0' },
+  { key: '自己啓発',  color: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
+  { key: '実用',      color: '#FCE7F3', text: '#9D174D', border: '#FBCFE8' },
+  { key: 'その他',    color: '#F3F4F6', text: '#374151', border: '#E5E7EB' },
+];
+
+function detectGenre(title) {
+  const t = title || '';
+  if (/（\d+）|第?\d+巻|\(\d+\)|コミックス|少年|少女|ジャンプ|マガジン|サンデー|チャンピオン|ガンガン|アフタヌーン|ヤングジャンプ|ビッグコミック/.test(t)) return 'マンガ';
+  if (/プログラミング|エンジニア|コーディング|Python|JavaScript|TypeScript|React|Vue|AWS|Linux|AI|機械学習|データサイエンス|アルゴリズム|ソフトウェア/.test(t)) return '技術・IT';
+  if (/ビジネス|経営|投資|マーケ|会計|起業|リーダーシップ|マネジメント|戦略|組織|財務|株|資産|経済|MBA/.test(t)) return 'ビジネス';
+  if (/自己啓発|習慣|思考法|メンタル|マインド|成功|幸福|コミュニケーション術|モチベ|潜在意識/.test(t)) return '自己啓発';
+  if (/小説|ノベル|ライトノベル|物語|エッセイ|詩集|SF|ファンタジー|ミステリー|推理|伝記/.test(t)) return '小説';
+  if (/料理|レシピ|健康|ダイエット|医学|科学|歴史|地理|語学|英語|資格|試験|旅行/.test(t)) return '実用';
+  return 'その他';
+}
+
+// タイトルから巻数を除いたシリーズ名を返す（シリーズでなければ null）
+function detectSeries(title) {
+  const cleaned = (title || '')
+    .replace(/[（(]\s*\d+\s*[)）]\s*(巻|冊|話|弾)?$/u, '')
+    .replace(/\s*第?\s*\d+\s*巻\s*$/u, '')
+    .replace(/\s+Vol\.?\s*\d+\s*$/i, '')
+    .replace(/\s+\d+\s*$/u, '')
+    .trim();
+  return (cleaned !== (title || '').trim() && cleaned.length >= 2) ? cleaned : null;
+}
+
+// タイトルから巻番号を取得（なければ null）
+function detectVolume(title) {
+  const t = title || '';
+  const patterns = [
+    /[（(]\s*(\d+)\s*[)）]/,   // （15）(15)
+    /第\s*(\d+)\s*[巻冊話]/,   // 第15巻
+    /(\d+)\s*[巻冊]/,           // 15巻
+    /Vol\.?\s*(\d+)/i,          // Vol.15
+  ];
+  for (const p of patterns) {
+    const m = t.match(p);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+// タイトルの巻数部分だけ次の巻数に差し替えて新しいタイトルを生成
+function constructNextTitle(title, nextVol) {
+  const t = title || '';
+  let r;
+  r = t.replace(/([（(])\s*\d+\s*([)）])/, `$1${nextVol}$2`); if (r !== t) return r;
+  r = t.replace(/(第\s*)\d+(\s*[巻冊])/, `$1${nextVol}$2`);   if (r !== t) return r;
+  r = t.replace(/\d+(\s*[巻冊])/, `${nextVol}$1`);            if (r !== t) return r;
+  r = t.replace(/(Vol\.?\s*)\d+/i, `$1${nextVol}`);           if (r !== t) return r;
+  r = t.replace(/(\s+)\d+(\s*)$/, `$1${nextVol}$2`);          if (r !== t) return r;
+  return `${t}（${nextVol}）`;
+}
+
+// シリーズの最新巻の次の巻が未所持の場合、仮置きカード情報を返す
+function findPlaceholderSuggestions(books) {
+  const realBooks = books.filter(b => !b.isPlaceholder);
+  const seriesMap = new Map();
+  realBooks.forEach(b => {
+    const series = detectSeries(b.title);
+    const vol = detectVolume(b.title);
+    if (!series || vol === null) return;
+    if (!seriesMap.has(series)) seriesMap.set(series, []);
+    seriesMap.get(series).push({ ...b, _vol: vol });
+  });
+
+  const suggestions = [];
+  seriesMap.forEach((items, series) => {
+    const maxVol = Math.max(...items.map(i => i._vol));
+    const nextVol = maxVol + 1;
+    // 次の巻が既にある（実本 or 仮置き）ならスキップ
+    const nextExists = books.some(b => detectSeries(b.title) === series && detectVolume(b.title) === nextVol);
+    if (nextExists) return;
+    // 最大巻のアイテムをベースに仮置きを作成
+    const base = items.find(i => i._vol === maxVol);
+    suggestions.push({
+      id: genId(),
+      title: constructNextTitle(base.title, nextVol),
+      author: base.author || '',
+      genre: base.genre || '',
+      cover: null,
+      status: '欲読',
+      isPlaceholder: true,
+      addedAt: new Date().toISOString(),
+      rating: 0, memo: '', orderDate: '', asin: '', isbn: '', publisher: '',
+    });
+  });
+  return suggestions;
+}
+
+// 「読完・途読の次の巻が積読/欲読にある」リストを返す
+function findNextVolumeSuggestions(books) {
+  // シリーズ × 巻番号でマップ化
+  const seriesMap = new Map();
+  books.forEach(b => {
+    const series = detectSeries(b.title);
+    const vol = detectVolume(b.title);
+    if (!series || vol === null) return;
+    if (!seriesMap.has(series)) seriesMap.set(series, []);
+    seriesMap.get(series).push({ ...b, _vol: vol });
+  });
+
+  const suggestions = [];
+  seriesMap.forEach((items, series) => {
+    items.sort((a, b) => a._vol - b._vol);
+    // 読完・途読の中で最大巻番号
+    const read = items.filter(b => b.status === '読完' || b.status === '途読');
+    if (read.length === 0) return;
+    const maxVol = Math.max(...read.map(b => b._vol));
+    // 次の巻が積読にある？
+    const next = items.find(b => b._vol === maxVol + 1 && b.status === '積読');
+    if (next) suggestions.push({ series, book: next, afterVol: maxVol });
+  });
+  return suggestions;
+}
+
+// books配列をシリーズ別にグループ化（{type:'series',name,books} | {type:'single',book}）
+function groupBySeries(books) {
+  const seriesMap = new Map();
+  const order = [];
+  books.forEach(b => {
+    const s = detectSeries(b.title);
+    if (s) {
+      if (!seriesMap.has(s)) { seriesMap.set(s, []); order.push({ type: 'series', name: s }); }
+      seriesMap.get(s).push(b);
+    } else {
+      order.push({ type: 'single', book: b });
+    }
+  });
+  return order.map(o => o.type === 'single' ? o : { ...o, books: seriesMap.get(o.name) });
+}
+
+// Kindle JSON parser (from our extraction script)
+function parseKindleJSON(text) {
+  try {
+    const data = JSON.parse(text);
+    const books = Array.isArray(data) ? data : (data.books || []);
+    return books
+      .filter(b => b.title && b.title.trim().length > 1)
+      .map(b => ({
+        id: genId(),
+        title: b.title.trim(),
+        author: (b.author || '').trim(),
+        asin: b.asin || '',
+        cover: b.cover || null, publisher: '', isbn: '',
+        status: '積読',
+        addedAt: new Date().toISOString(),
+        rating: 0, memo: '', orderDate: b.orderDate || '',
+        genre: detectGenre(b.title.trim()),
+      }));
+  } catch (e) {
+    return [];
+  }
+}
+
+// The script users paste into Chrome DevTools console on the Kindle page
+const KINDLE_SCRIPT = `(async function(){
+  var allBooks=[],seen=new Set(),pageNum=1;
+
+  function inNav(el){
+    var p=el;
+    while(p&&p!==document.body){
+      var t=p.tagName,c=p.className||'',id=p.id||'';
+      if(t==='HEADER'||t==='NAV'||t==='FOOTER') return true;
+      if(/amzn-ss|nav-|toolbar|header|footer/i.test(c+id)) return true;
+      p=p.parentElement;
+    }
+    return false;
+  }
+  var NG=/^(Amazonアソシエイト|ツールバー|プロフィールの管理|Rufus|Amazon|リンク生成|ポイント|アカウント|注文履歴|カート|ヘルプ|設定|フィルター|すべて|Kindle Unlimited|コンテンツと端末|読み込み中|Loading)$/i;
+
+  // 1ページ分をスクロール展開して抽出
+  async function extractCurrentPage(){
+    var pageH=Math.max(document.body.scrollHeight,2000);
+    for(var y=0;y<pageH;y+=300){window.scrollTo(0,y);await new Promise(function(r){setTimeout(r,100);});}
+    window.scrollTo(0,0);
+    await new Promise(function(r){setTimeout(r,500);});
+    var found=[];
+    document.querySelectorAll('img').forEach(function(img){
+      if(inNav(img)) return;
+      var src=img.currentSrc||img.src||img.getAttribute('data-src')||'';
+      if(!src||src.startsWith('data:')||src.startsWith('blob:')) return;
+      var isAmazon=src.includes('media-amazon')||src.includes('images-amazon')||src.includes('ecx.images');
+      if(!isAmazon) return;
+      var w=img.naturalWidth||img.offsetWidth||0,h=img.naturalHeight||img.offsetHeight||0;
+      if(w<40||h<50) return;
+      for(var el=img.parentElement,i=0;el&&i<9;el=el.parentElement,i++){
+        var lines=(el.innerText||'').trim().split('\\n')
+          .map(function(l){return l.trim();})
+          .filter(function(l){return l.length>3&&l.length<200&&!/^(function|var |if\\(|window\\.|\\{|<|\\.|\\/\\/)/.test(l);});
+        if(lines.length>=1&&lines[0].length>3){
+          var title=lines[0];
+          if(NG.test(title)) break;
+          var key=title.substring(0,40);
+          if(!seen.has(key)){
+            seen.add(key);
+            var coverSrc=src.replace(/_S[XY]\\d+_/g,'_SY500_');
+            // 取得日・購入日を抽出
+            var allText=lines.join(' ');
+            var dateMatch=allText.match(/(?:取得日|購入日|注文日)[：:]\s*(\d{4}年\d{1,2}月\d{1,2}日|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+            var orderDate=dateMatch?dateMatch[1]:'';
+            found.push({title:title,author:lines.slice(1).find(function(l){return l.length>2&&l.length<80&&!/^\d{4}[年\/\-]/.test(l);})||'',asin:el.getAttribute('data-asin')||'',cover:coverSrc,orderDate:orderDate});
+          }
+          break;
+        }
+      }
+    });
+    return found;
+  }
+
+  // ページ番号ボタン（数字）を探す
+  function findPageNumButton(n){
+    var txt=String(n);
+    var all=Array.from(document.querySelectorAll('button,[role=button],a,li'));
+    return all.find(function(el){
+      if(el.disabled||el.getAttribute('aria-disabled')==='true') return false;
+      return (el.textContent||'').trim()===txt;
+    })||null;
+  }
+
+  // ページが "次のページ番号ボタン" になるまで待つ
+  async function waitForPage(targetPage,maxMs){
+    var deadline=Date.now()+maxMs;
+    while(Date.now()<deadline){
+      await new Promise(function(r){setTimeout(r,400);});
+      // ① ターゲットページ番号のボタンが aria-current="page" になっているか
+      var all=Array.from(document.querySelectorAll('[aria-current=page]'));
+      for(var i=0;i<all.length;i++){
+        if(parseInt((all[i].textContent||'').trim())===targetPage) return true;
+      }
+      // ② ターゲットのボタンが見つかって disabled になっているか（選択中を disabled で表すUIもある）
+      var all2=Array.from(document.querySelectorAll('button,[role=button],a,li'));
+      for(var j=0;j<all2.length;j++){
+        var el=all2[j];
+        var t=(el.textContent||'').trim();
+        if(t===String(targetPage)){
+          var dis=el.disabled||el.getAttribute('aria-disabled')==='true'||
+                  el.getAttribute('aria-current')==='page'||
+                  (el.className&&/active|current|selected/i.test(el.className));
+          if(dis) return true;
+        }
+      }
+      // ③ 先頭のAmazon画像URLが変わったか（フォールバック）
+      var imgs=document.querySelectorAll('img');
+      for(var k=0;k<imgs.length;k++){
+        var s=imgs[k].currentSrc||imgs[k].src||'';
+        if(s&&s.includes('media-amazon')&&!s.startsWith('data:')){
+          if(s!==waitForPage._lastSrc){waitForPage._lastSrc=s;return true;}
+          break;
+        }
+      }
+    }
+    return false;
+  }
+  waitForPage._lastSrc='';
+
+  // ── メインループ：「次のページ番号ボタン」を順番にクリック ──
+  while(true){
+    console.log('📖 ページ'+pageNum+'を取得中...');
+    var found=await extractCurrentPage();
+    if(found.length===0&&pageNum===1){
+      alert('本が見つかりませんでした。\\nKindleのコンテンツ一覧ページで実行してください。\\nhttps://www.amazon.co.jp/hz/mycd/digital-console/contentlist/booksAll/dateDsc/');
+      return;
+    }
+    allBooks=allBooks.concat(found);
+    console.log('ページ'+pageNum+': '+found.length+'冊追加, 累計: '+allBooks.length+'冊');
+
+    var nextPageNum=pageNum+1;
+    var nextBtn=findPageNumButton(nextPageNum);
+    if(!nextBtn){
+      console.log('✅ ページ'+nextPageNum+'ボタンが見つからず。最終ページ到達。');
+      break;
+    }
+
+    // 現在の先頭画像URLを記録
+    document.querySelectorAll('img').forEach(function(img){
+      if(!waitForPage._lastSrc){var s=img.currentSrc||img.src||'';if(s.includes('media-amazon'))waitForPage._lastSrc=s;}
+    });
+
+    console.log('⏭ ページ'+nextPageNum+'へ移動...');
+    nextBtn.click();
+    var changed=await waitForPage(nextPageNum,8000);
+    if(!changed){console.log('⚠️ ページ変化を検知できず、終了します。');break;}
+    pageNum++;
+  }
+
+  if(allBooks.length===0){alert('本が見つかりませんでした。');return;}
+  var j=JSON.stringify({source:'kindle',books:allBooks,at:new Date().toISOString()});
+  var a=document.createElement('a');
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(j);
+  a.download='kindle-books.json';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  alert('🎉 全'+pageNum+'ページ、'+allBooks.length+'冊のデータを取得！\\nどっかんに戻ってJSONをインポートしてください。');
+})();`.trim();
+
+// ─── COLUMN CONFIG ────────────────────────────────────────────
+
+const COLS = [
+  { key: '欲読', emoji: '📚', color: '#EBF4FF', border: '#BFDBFE', accent: '#3B82F6', desc: '読みたい本' },
+  { key: '積読', emoji: '📦', color: '#FFFBEB', border: '#FDE68A', accent: '#D97706', desc: '積んでる本' },
+  { key: '途読', emoji: '📖', color: '#ECFDF5', border: '#A7F3D0', accent: '#059669', desc: '読んでる本' },
+  { key: '読完', emoji: '✅', color: '#F5F3FF', border: '#DDD6FE', accent: '#7C3AED', desc: '読み終えた本' },
+];
+
+// ─── BOOK CARD ────────────────────────────────────────────────
+
+function GenreBadge({ genre }) {
+  const g = GENRES.find(x => x.key === genre);
+  if (!g) return null;
+  return (
+    <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
+                   padding: '1px 6px', borderRadius: 99,
+                   background: g.color, color: g.text, border: `1px solid ${g.border}`,
+                   whiteSpace: 'nowrap', flexShrink: 0 }}>
+      {g.key}
+    </span>
+  );
+}
+
+function BookCard({ book, onDragStart, onDragEnd, onClick, onMoveUp, onMoveDown, onDelete, isFirst, isLast, onReorder }) {
+  const col = COLS.find(c => c.key === book.status) || COLS[0];
+  const [imgFailed, setImgFailed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [dropPos, setDropPos] = useState(null); // 'before' | 'after' | null
+
+  const coverUrl = (!imgFailed && book.cover) ? book.cover : null;
+  const seriesName = detectSeries(book.title);
+  const volNum = detectVolume(book.title);
+
+  const btnBase = {
+    width: 22, height: 22, padding: 0, border: '1px solid #e5e7eb', borderRadius: 5,
+    background: 'white', cursor: 'pointer', fontSize: 11,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  };
+
+  const handleCardDragOver = (e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDropPos(e.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+  };
+
+  const handleCardDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation(); // 列のdropに伝播させない
+    const draggedId = e.dataTransfer.getData('bookId');
+    if (draggedId && draggedId !== book.id) {
+      onReorder(draggedId, book.id, dropPos || 'before');
+    }
+    setDropPos(null);
+  };
+
+  return (
+    <div
+      className={`book-card${book._dragging ? ' dragging' : ''}`}
+      style={{ position: 'relative', opacity: book.isPlaceholder ? 0.75 : 1,
+               borderLeft: seriesName ? `3px solid ${col.accent}` : '3px solid transparent',
+               border: book.isPlaceholder ? `1.5px dashed ${col.accent}` : undefined }}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); onDragStart(book.id); }}
+      onDragEnd={(e) => { setDropPos(null); onDragEnd(e); }}
+      onDragOver={handleCardDragOver}
+      onDragLeave={() => setDropPos(null)}
+      onDrop={handleCardDrop}
+      onClick={() => onClick(book)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* ドロップインジケーター（上） */}
+      {dropPos === 'before' && (
+        <div style={{ position: 'absolute', top: -2, left: 4, right: 4, height: 3,
+                      background: '#6366f1', borderRadius: 99, zIndex: 10 }} />
+      )}
+
+      {/* 表紙 + バッジ */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        {book.isPlaceholder
+          ? <div className="book-cover-placeholder"
+                 style={{ background: col.color, border: `2px dashed ${col.accent}`,
+                          flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 18 }}>?</span>
+            </div>
+          : coverUrl
+            ? <img src={coverUrl} alt="" className="book-cover" onError={() => setImgFailed(true)} />
+            : <div className="book-cover-placeholder" style={{ background: col.color }}>{col.emoji}</div>
+        }
+        {/* 巻数バッジ */}
+        {seriesName && volNum !== null && (
+          <div style={{ position: 'absolute', bottom: 2, right: 0,
+                        background: book.isPlaceholder ? col.border : col.accent,
+                        color: book.isPlaceholder ? col.accent : 'white',
+                        fontSize: 9, fontWeight: 800, lineHeight: 1,
+                        padding: '2px 4px', borderRadius: '3px 0 3px 0',
+                        minWidth: 16, textAlign: 'center' }}>
+            {volNum}
+          </div>
+        )}
+        {/* 仮置きバッジ */}
+        {book.isPlaceholder && (
+          <div style={{ position: 'absolute', top: 2, left: 0,
+                        background: col.accent, color: 'white',
+                        fontSize: 9, fontWeight: 800, padding: '1px 4px',
+                        borderRadius: '0 3px 3px 0' }}>
+            仮
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* シリーズ名を薄く表示 */}
+        {seriesName && (
+          <div style={{ fontSize: 10, color: col.accent, fontWeight: 600,
+                        marginBottom: 1, overflow: 'hidden',
+                        whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+            {seriesName}
+          </div>
+        )}
+        <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.45, marginBottom: 3,
+                      overflow: 'hidden', display: '-webkit-box',
+                      WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+          {book.title}
+        </div>
+        {book.author && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 3 }}>{book.author}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+          {book.genre && <GenreBadge genre={book.genre} />}
+          {book.rating > 0 && <span style={{ fontSize: 12 }}>{'⭐'.repeat(book.rating)}</span>}
+          {book.orderDate && <span style={{ fontSize: 10, color: '#9ca3af' }}>📦 {book.orderDate}</span>}
+        </div>
+      </div>
+
+      {/* ↑↓× ボタン（ホバー時に表示） */}
+      {hovered && (
+        <div
+          style={{ position: 'absolute', top: 5, right: 5,
+                   display: 'flex', flexDirection: 'column', gap: 3 }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button onClick={() => onMoveUp()} disabled={isFirst}
+            style={{ ...btnBase, color: isFirst ? '#d1d5db' : '#374151',
+                     cursor: isFirst ? 'default' : 'pointer' }}
+            title="上へ">▲</button>
+          <button onClick={() => onMoveDown()} disabled={isLast}
+            style={{ ...btnBase, color: isLast ? '#d1d5db' : '#374151',
+                     cursor: isLast ? 'default' : 'pointer' }}
+            title="下へ">▼</button>
+          <button onClick={() => onDelete()}
+            style={{ ...btnBase, color: '#ef4444', border: '1px solid #fca5a5' }}
+            title="削除">✕</button>
+        </div>
+      )}
+
+      {/* ドロップインジケーター（下） */}
+      {dropPos === 'after' && (
+        <div style={{ position: 'absolute', bottom: -2, left: 4, right: 4, height: 3,
+                      background: '#6366f1', borderRadius: 99, zIndex: 10 }} />
+      )}
+    </div>
+  );
+}
+
+// ─── SERIES GROUP CARD ────────────────────────────────────────
+
+function SeriesGroupCard({ name, books, expanded, onToggle, onBookClick, onMoveUp, onMoveDown, onDelete, onReorder, isFirst, isLast }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const cover = !imgFailed && books[0]?.cover ? books[0].cover : null;
+  const col = COLS.find(c => c.key === books[0]?.status) || COLS[0];
+  const genre = books[0]?.genre;
+
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {/* シリーズヘッダー */}
+      <div style={{ background: 'white', borderRadius: 10, padding: '8px 10px',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
+                    border: `2px solid ${expanded ? col.accent : '#e5e7eb'}`,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+           onClick={onToggle}>
+        {cover
+          ? <img src={cover} alt="" style={{ width: 36, height: 50, objectFit: 'contain',
+              background: '#f3f4f6', borderRadius: 4, flexShrink: 0 }}
+              onError={() => setImgFailed(true)} />
+          : <div style={{ width: 36, height: 50, background: col.color, borderRadius: 4,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, flexShrink: 0 }}>{col.emoji}</div>
+        }
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.4,
+                        overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+            {name}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+            <span style={{ fontSize: 11, background: col.border, color: col.accent,
+                           fontWeight: 700, padding: '1px 7px', borderRadius: 99 }}>
+              {books.length}冊
+            </span>
+            {genre && <GenreBadge genre={genre} />}
+          </div>
+        </div>
+        <span style={{ color: '#9ca3af', fontSize: 13, flexShrink: 0 }}>
+          {expanded ? '▲' : '▼'}
+        </span>
+      </div>
+
+      {/* 展開時：個別カード */}
+      {expanded && (
+        <div style={{ paddingLeft: 12, marginTop: 4 }}>
+          {books.map((b, idx) => (
+            <BookCard key={b.id} book={b}
+              onDragStart={() => {}} onDragEnd={() => {}} onClick={onBookClick}
+              onMoveUp={() => onMoveUp(b.id)} onMoveDown={() => onMoveDown(b.id)}
+              onDelete={() => onDelete(b.id)} onReorder={onReorder}
+              isFirst={isFirst && idx === 0} isLast={isLast && idx === books.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── KANBAN COLUMN ────────────────────────────────────────────
+
+function KanbanColumn({ cfg, books, isDragOver, onDragOver, onDragLeave, onDrop, onDragStart, onDragEnd, onBookClick, onMoveUp, onMoveDown, onDelete, onReorder, expandedSeries, onToggleSeries }) {
+  return (
+    <div
+      className={`column${isDragOver ? ' column-drop-active' : ''}`}
+      style={{ background: cfg.color, borderColor: cfg.border }}
+      onDragOver={(e) => { e.preventDefault(); onDragOver(cfg.key); }}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => { e.preventDefault(); onDrop(e.dataTransfer.getData('bookId'), cfg.key); }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 13 }}>
+        <span style={{ fontSize: 20 }}>{cfg.emoji}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: cfg.accent }}>{cfg.key}</div>
+          <div style={{ fontSize: 10, color: '#9ca3af' }}>{cfg.desc}</div>
+        </div>
+        <div style={{ background: cfg.border, color: cfg.accent, fontWeight: 700, fontSize: 12,
+                      borderRadius: 999, padding: '2px 9px' }}>
+          {books.length}
+        </div>
+      </div>
+
+      {/* Cards（シリーズグループ対応） */}
+      {(() => {
+        const groups = groupBySeries(books);
+        return groups.map((g, idx) => g.type === 'single'
+          ? <BookCard key={g.book.id} book={g.book}
+              onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onBookClick}
+              onMoveUp={() => onMoveUp(g.book.id)} onMoveDown={() => onMoveDown(g.book.id)}
+              onDelete={() => onDelete(g.book.id)} onReorder={onReorder}
+              isFirst={idx === 0} isLast={idx === groups.length - 1}
+            />
+          : <SeriesGroupCard key={g.name} name={g.name} books={g.books}
+              expanded={!!expandedSeries[g.name]}
+              onToggle={() => onToggleSeries(g.name)}
+              onBookClick={onBookClick}
+              onMoveUp={onMoveUp} onMoveDown={onMoveDown}
+              onDelete={onDelete} onReorder={onReorder}
+              isFirst={idx === 0} isLast={idx === groups.length - 1}
+            />
+        );
+      })()}
+
+      {books.length === 0 && (
+        <div style={{ border: `2px dashed ${cfg.border}`, borderRadius: 9, padding: '28px 0',
+                      textAlign: 'center', color: '#d1d5db', fontSize: 12 }}>
+          ここにドロップ
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── NEXT VOLUME BANNER ───────────────────────────────────────
+
+function NextVolumeBanner({ suggestions, onMoveOne, onMoveAll, onDismiss }) {
+  const [open, setOpen] = useState(true);
+  if (!open || suggestions.length === 0) return null;
+
+  return (
+    <div style={{ background: '#FFFBEB', borderBottom: '1px solid #FDE68A',
+                  padding: '10px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: open ? 8 : 0 }}>
+        <span style={{ fontSize: 16 }}>📖</span>
+        <span style={{ fontWeight: 700, fontSize: 13, color: '#92400E' }}>
+          続きが積読にある本が {suggestions.length}シリーズあります
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {suggestions.length > 1 && (
+            <button onClick={onMoveAll}
+              style={{ padding: '4px 12px', background: '#D97706', color: 'white',
+                       border: 'none', borderRadius: 7, cursor: 'pointer',
+                       fontWeight: 700, fontSize: 12 }}>
+              まとめて欲読へ
+            </button>
+          )}
+          <button onClick={() => { setOpen(false); onDismiss(); }}
+            style={{ padding: '4px 10px', background: 'transparent', color: '#9ca3af',
+                     border: '1px solid #e5e7eb', borderRadius: 7, cursor: 'pointer', fontSize: 12 }}>
+            閉じる
+          </button>
+        </div>
+      </div>
+
+      {/* 個別リスト */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {suggestions.map(({ series, book, afterVol }) => (
+          <div key={book.id} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                                      background: 'white', borderRadius: 8, padding: '6px 10px',
+                                      border: '1px solid #FDE68A' }}>
+            {book.cover
+              ? <img src={book.cover} alt="" style={{ width: 28, height: 38, objectFit: 'contain',
+                  background: '#f3f4f6', borderRadius: 3, flexShrink: 0 }} />
+              : <span style={{ fontSize: 20, flexShrink: 0 }}>📦</span>
+            }
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>{series}</span>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937',
+                            overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                {book.title}
+              </div>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>{afterVol}巻まで読了 → 次は{afterVol + 1}巻</span>
+            </div>
+            <button onClick={() => onMoveOne(book.id)}
+              style={{ padding: '4px 12px', background: '#FEF3C7', color: '#92400E',
+                       border: '1px solid #FDE68A', borderRadius: 7, cursor: 'pointer',
+                       fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
+              欲読へ →
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── FILTER BAR ───────────────────────────────────────────────
+
+function FilterBar({ books, filterGenre, onFilter, viewMode, onViewMode }) {
+  // 実際に使われているジャンルだけ表示
+  const usedGenres = GENRES.filter(g => books.some(b => b.genre === g.key));
+
+  return (
+    <div style={{ background: 'white', borderBottom: '1px solid #f0ede8',
+                  padding: '8px 20px', display: 'flex', alignItems: 'center',
+                  gap: 8, flexWrap: 'wrap' }}>
+
+      {/* ビュー切り替え */}
+      <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 8, padding: 2, flexShrink: 0 }}>
+        {[['kanban', '📋 カンバン'], ['genre', '🏷️ ジャンル別']].map(([mode, label]) => (
+          <button key={mode} onClick={() => onViewMode(mode)}
+            style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                     fontWeight: 600, fontSize: 12,
+                     background: viewMode === mode ? 'white' : 'transparent',
+                     color: viewMode === mode ? '#374151' : '#9ca3af',
+                     boxShadow: viewMode === mode ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ width: 1, height: 20, background: '#e5e7eb', flexShrink: 0 }} />
+
+      {/* ジャンルフィルター */}
+      <button onClick={() => onFilter(null)}
+        style={{ padding: '4px 11px', borderRadius: 99, border: '1.5px solid',
+                 fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                 background: filterGenre === null ? '#1f2937' : 'white',
+                 color: filterGenre === null ? 'white' : '#6b7280',
+                 borderColor: filterGenre === null ? '#1f2937' : '#e5e7eb' }}>
+        すべて
+      </button>
+      {usedGenres.map(g => (
+        <button key={g.key} onClick={() => onFilter(filterGenre === g.key ? null : g.key)}
+          style={{ padding: '4px 11px', borderRadius: 99, border: `1.5px solid`,
+                   fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                   background: filterGenre === g.key ? g.text : g.color,
+                   color: filterGenre === g.key ? 'white' : g.text,
+                   borderColor: filterGenre === g.key ? g.text : g.border }}>
+          {g.key} {books.filter(b => b.genre === g.key).length}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── GENRE VIEW ───────────────────────────────────────────────
+
+function GenreView({ books, filterGenre, expandedSeries, onToggleSeries,
+                     onBookClick, onMoveUp, onMoveDown, onDelete, onReorder }) {
+  const genres = filterGenre
+    ? GENRES.filter(g => g.key === filterGenre)
+    : GENRES.filter(g => books.some(b => b.genre === g.key));
+
+  return (
+    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {genres.map(g => {
+        const genreBooks = books.filter(b => b.genre === g.key);
+        if (genreBooks.length === 0) return null;
+        const groups = groupBySeries(genreBooks);
+        return (
+          <div key={g.key}>
+            {/* ジャンルヘッダー */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ height: 3, width: 24, background: g.text, borderRadius: 99 }} />
+              <span style={{ fontWeight: 800, fontSize: 16, color: g.text }}>{g.key}</span>
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>{genreBooks.length}冊</span>
+            </div>
+            {/* カード（シリーズグループ対応）横スクロール */}
+            <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
+              {groups.map((grp, idx) => grp.type === 'single'
+                ? (
+                  <div key={grp.book.id} style={{ flexShrink: 0, width: 220 }}>
+                    <BookCard book={grp.book}
+                      onDragStart={() => {}} onDragEnd={() => {}} onClick={onBookClick}
+                      onMoveUp={() => onMoveUp(grp.book.id)} onMoveDown={() => onMoveDown(grp.book.id)}
+                      onDelete={() => onDelete(grp.book.id)} onReorder={onReorder}
+                      isFirst={idx === 0} isLast={idx === groups.length - 1}
+                    />
+                  </div>
+                )
+                : (
+                  <div key={grp.name} style={{ flexShrink: 0, width: 220 }}>
+                    <SeriesGroupCard name={grp.name} books={grp.books}
+                      expanded={!!expandedSeries[grp.name]}
+                      onToggle={() => onToggleSeries(grp.name)}
+                      onBookClick={onBookClick}
+                      onMoveUp={onMoveUp} onMoveDown={onMoveDown}
+                      onDelete={onDelete} onReorder={onReorder}
+                      isFirst={idx === 0} isLast={idx === groups.length - 1}
+                    />
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── ADD BOOK MODAL ───────────────────────────────────────────
+
+function AddBookModal({ onClose, onAdd }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [targetStatus, setTargetStatus] = useState('欲読');
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setLoading(true); setSearched(true);
+    const r = await searchGoogleBooks(query);
+    setResults(r); setLoading(false);
+  };
+
+  const add = (info) => {
+    onAdd({ id: genId(), ...info, status: targetStatus,
+            addedAt: new Date().toISOString(), rating: 0, memo: '', orderDate: '', asin: '' });
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 19, fontWeight: 800 }}>📚 本を追加</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#9ca3af', lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Status selector */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>追加先</div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {COLS.map(c => (
+              <button key={c.key} className="tag-btn"
+                onClick={() => setTargetStatus(c.key)}
+                style={{
+                  borderColor: targetStatus === c.key ? c.accent : '#e5e7eb',
+                  background: targetStatus === c.key ? c.color : 'white',
+                  color: targetStatus === c.key ? c.accent : '#6b7280',
+                  fontWeight: targetStatus === c.key ? 700 : 400,
+                }}>
+                {c.emoji} {c.key}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Search */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input value={query} onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && search()}
+            placeholder="タイトル・著者・ISBNで検索"
+            style={{ flex: 1, padding: '10px 14px', border: '1.5px solid #e5e7eb',
+                     borderRadius: 9, fontSize: 14 }} />
+          <button className="btn-primary" onClick={search} disabled={loading}>
+            {loading ? '…' : '検索'}
+          </button>
+        </div>
+
+        {/* Results */}
+        {searched && !loading && results.length === 0 && (
+          <div style={{ textAlign: 'center', color: '#9ca3af', padding: '24px 0', fontSize: 13 }}>
+            見つかりませんでした
+          </div>
+        )}
+        <div style={{ maxHeight: 370, overflowY: 'auto' }}>
+          {results.map((b, i) => (
+            <div key={i} className="search-result-row" onClick={() => add(b)}>
+              {b.cover
+                ? <img src={b.cover} alt="" style={{ width: 42, height: 58, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }} />
+                : <div style={{ width: 42, height: 58, background: '#f3f4f6', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 18 }}>📗</div>
+              }
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2, lineHeight: 1.4 }}>{b.title}</div>
+                {b.author && <div style={{ fontSize: 12, color: '#6b7280' }}>{b.author}</div>}
+                {b.publisher && <div style={{ fontSize: 11, color: '#9ca3af' }}>{b.publisher}{b.publishedDate ? ` (${b.publishedDate})` : ''}</div>}
+              </div>
+              <button className="btn-primary" style={{ padding: '5px 12px', fontSize: 12, flexShrink: 0 }}>追加</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── KINDLE IMPORT MODAL ─────────────────────────────────────
+
+function ImportModal({ onClose, onImport }) {
+  const [step, setStep] = useState(1);
+  const [parsed, setParsed] = useState([]);
+  const [sel, setSel] = useState({});
+  const [copied, setCopied] = useState(false);
+  const fileRef = useRef();
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const books = parseKindleJSON(ev.target.result);
+      const s = {};
+      books.forEach(b => { s[b.id] = true; });
+      setParsed(books); setSel(s); setStep(3);
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const copyScript = () => {
+    navigator.clipboard.writeText(KINDLE_SCRIPT).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const selCount = Object.values(sel).filter(Boolean).length;
+  const doImport = () => { onImport(parsed.filter(b => sel[b.id])); onClose(); };
+  const toggleAll = (v) => { const s = {}; parsed.forEach(b => { s[b.id] = v; }); setSel(s); };
+
+  const steps = ['手順を確認', 'スクリプトを実行', 'JSONを取り込む'];
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 19, fontWeight: 800 }}>📱 Kindleから取り込む</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#9ca3af', lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Step indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 22, gap: 4 }}>
+          {steps.map((s, i) => (
+            <React.Fragment key={i}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                              background: step > i+1 ? '#10b981' : step === i+1 ? '#6366f1' : '#e5e7eb',
+                              color: step >= i+1 ? 'white' : '#9ca3af',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 11, fontWeight: 700 }}>
+                  {step > i+1 ? '✓' : i+1}
+                </div>
+                <span style={{ fontSize: 11, color: step === i+1 ? '#6366f1' : '#9ca3af',
+                               fontWeight: step === i+1 ? 600 : 400, whiteSpace: 'nowrap' }}>
+                  {s}
+                </span>
+              </div>
+              {i < 2 && <div style={{ flex: 1, height: 1, background: '#e5e7eb', margin: '0 4px' }} />}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* STEP 1: 手順 */}
+        {step === 1 && (
+          <div>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16, lineHeight: 1.7 }}>
+              KindleライブラリページでスクリプトをCtrl+V→Enterで実行するだけで、購入済みの本データをまとめて取り込めます。
+            </p>
+            {[
+              { n: 1, title: 'Kindleライブラリページを開く',
+                body: (
+                  <span>
+                    <a href="https://www.amazon.co.jp/hz/mycd/digital-console/contentlist/booksAll/dateDsc/"
+                      target="_blank" style={{ color: '#6366f1', fontWeight: 600 }}>
+                      このリンク
+                    </a>
+                    {' '}をクリック。Amazonにログインした状態で、Kindle本の一覧が表示されます。
+                  </span>
+                )},
+              { n: 2, title: 'デベロッパーツールを開く',
+                body: <span><b>F12</b>キー（Macは <b>Command+Option+I</b>）を押してデベロッパーツールを開き、上部タブから <b>「Console」</b> をクリック。</span>
+              },
+              { n: 3, title: '本の表紙が表示されたらスクリプトを実行',
+                body: 'Kindleページに本の表紙一覧が表示されてから、スクリプトをConsoleに貼り付けてEnter。自動でデータを取得してJSONをダウンロードします。' },
+              { n: 4, title: 'JSONファイルをここに取り込む',
+                body: '「○冊のデータを取得！」と表示されたらどっかんに戻り、ダウンロードされたkinde-books.jsonをステップ3でドロップします。' },
+            ].map(s => (
+              <div key={s.n} className="step-box">
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <div className="step-num">{s.n}</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{s.title}</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.65 }}>{s.body}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button className="btn-primary" style={{ width: '100%', marginTop: 8, padding: '12px' }}
+              onClick={() => setStep(2)}>
+              スクリプトを確認する →
+            </button>
+          </div>
+        )}
+
+        {/* STEP 2: スクリプト */}
+        {step === 2 && (
+          <div>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12, lineHeight: 1.6 }}>
+              Kindleライブラリページで<strong>本の表紙が表示された状態</strong>で Console に貼り付けて Enter を押してください。最大25秒、自動で読み込みを待ちます。
+            </p>
+            <div style={{ position: 'relative', marginBottom: 12 }}>
+              <pre style={{
+                background: '#1e1e2e', color: '#cdd6f4', borderRadius: 10,
+                padding: '14px 16px', fontSize: 10.5, lineHeight: 1.6,
+                overflowX: 'auto', maxHeight: 220, userSelect: 'all',
+                fontFamily: 'Monaco, Menlo, Consolas, monospace',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              }}>
+                {KINDLE_SCRIPT}
+              </pre>
+              <button onClick={copyScript} style={{
+                position: 'absolute', top: 8, right: 8,
+                background: copied ? '#10b981' : '#6366f1',
+                color: 'white', border: 'none', borderRadius: 6,
+                padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600,
+                transition: 'background 0.2s',
+              }}>
+                {copied ? '✓ コピー済み' : 'コピー'}
+              </button>
+            </div>
+            <div style={{ background: '#FFF8E7', border: '1px solid #FDE68A', borderRadius: 8,
+                          padding: '10px 14px', fontSize: 12, color: '#92400e', marginBottom: 14 }}>
+              💡 ページが複数ある場合は、次のページに進んで何度か実行してください。どっかんが自動で重複をスキップします。
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => setStep(1)}>← 戻る</button>
+              <button className="btn-primary" style={{ flex: 2 }} onClick={() => setStep(3)}>
+                JSONファイルを取り込む →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: ファイル取り込み */}
+        {step === 3 && parsed.length === 0 && (
+          <div>
+            <div
+              style={{ border: '2px dashed #d1d5db', borderRadius: 12, padding: '44px 20px',
+                       textAlign: 'center', cursor: 'pointer', background: '#fafaf8',
+                       transition: 'border-color 0.15s' }}
+              onClick={() => fileRef.current.click()}
+              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#818cf8'; }}
+              onDragLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; }}
+              onDrop={e => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = '#d1d5db';
+                handleFile({ target: { files: e.dataTransfer.files } });
+              }}
+            >
+              <div style={{ fontSize: 48, marginBottom: 10 }}>📂</div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>kindle-books.json をドロップ</div>
+              <div style={{ fontSize: 13, color: '#9ca3af' }}>またはクリックしてファイルを選択</div>
+            </div>
+            <input ref={fileRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFile} />
+            <button className="btn-ghost" style={{ width: '100%', marginTop: 10, padding: '10px' }}
+              onClick={() => setStep(2)}>← スクリプトに戻る</button>
+          </div>
+        )}
+
+        {/* STEP 3: 本の選択 */}
+        {step === 3 && parsed.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: '#6b7280' }}>{parsed.length}冊が見つかりました</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => toggleAll(true)}
+                  style={{ fontSize: 12, color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>全選択</button>
+                <button onClick={() => toggleAll(false)}
+                  style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>全解除</button>
+              </div>
+            </div>
+            <div style={{ border: '1px solid #f0ede8', borderRadius: 10, maxHeight: 300, overflowY: 'auto' }}>
+              {parsed.map(b => (
+                <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+                                           borderBottom: '1px solid #f8f7f4', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!sel[b.id]}
+                    onChange={e => setSel(prev => ({ ...prev, [b.id]: e.target.checked }))}
+                    style={{ width: 15, height: 15, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden',
+                                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</div>
+                    {b.author && <div style={{ fontSize: 11, color: '#9ca3af' }}>{b.author}</div>}
+                  </div>
+                  <span style={{ fontSize: 10, color: '#D97706', background: '#FFFBEB',
+                                 padding: '2px 8px', borderRadius: 999, flexShrink: 0 }}>📦 積読</span>
+                </label>
+              ))}
+            </div>
+            <button className="btn-primary" style={{ width: '100%', marginTop: 12, padding: '12px' }}
+              disabled={selCount === 0} onClick={doImport}>
+              {selCount}冊を積読に追加する
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── BOOK DETAIL MODAL ────────────────────────────────────────
+
+function BookDetailModal({ book, onClose, onUpdate, onDelete }) {
+  const [ed, setEd] = useState({ ...book });
+  const col = COLS.find(c => c.key === ed.status) || COLS[0];
+
+  const save = () => { onUpdate(ed); onClose(); };
+  const del = () => { if (window.confirm('この本を削除しますか？')) { onDelete(book.id); onClose(); } };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        {/* Header */}
+        <div style={{ display: 'flex', gap: 14, marginBottom: 20, alignItems: 'flex-start' }}>
+          {ed.cover
+            ? <img src={ed.cover} alt="" style={{ width: 66, height: 92, objectFit: 'cover', borderRadius: 7, flexShrink: 0 }} />
+            : <div style={{ width: 66, height: 92, background: col.color, borderRadius: 7,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 28, flexShrink: 0 }}>{col.emoji}</div>
+          }
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <textarea value={ed.title} onChange={e => setEd({...ed, title: e.target.value})}
+              style={{ fontWeight: 700, fontSize: 15, border: 'none', width: '100%',
+                       borderBottom: '1px solid #e5e7eb', paddingBottom: 4, marginBottom: 6,
+                       lineHeight: 1.4, minHeight: 44, resize: 'none',
+                       background: 'none' }} />
+            <input value={ed.author} onChange={e => setEd({...ed, author: e.target.value})}
+              placeholder="著者名"
+              style={{ fontSize: 13, color: '#6b7280', border: 'none', width: '100%',
+                       borderBottom: '1px solid #f0ede8', paddingBottom: 3 }} />
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22,
+                                             cursor: 'pointer', color: '#9ca3af', lineHeight: 1, flexShrink: 0 }}>×</button>
+        </div>
+
+        {/* Status */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>ステータス</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {COLS.map(c => (
+              <button key={c.key} className="tag-btn" onClick={() => setEd({...ed, status: c.key})}
+                style={{ borderColor: ed.status === c.key ? c.accent : '#e5e7eb',
+                         background: ed.status === c.key ? c.color : 'white',
+                         color: ed.status === c.key ? c.accent : '#6b7280',
+                         fontWeight: ed.status === c.key ? 700 : 400 }}>
+                {c.emoji} {c.key}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Rating */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>評価</div>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {[1,2,3,4,5].map(n => (
+              <button key={n} className="star-btn"
+                onClick={() => setEd({...ed, rating: ed.rating === n ? 0 : n})}>
+                {n <= ed.rating ? '⭐' : '☆'}
+              </button>
+            ))}
+            {ed.rating > 0 && (
+              <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 6, alignSelf: 'center' }}>
+                {['', '気になった', 'まあまあ', 'よかった', 'とても良い', '最高！'][ed.rating]}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Memo */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>メモ・感想</div>
+          <textarea value={ed.memo} onChange={e => setEd({...ed, memo: e.target.value})}
+            placeholder="感想・メモを書く..."
+            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #e5e7eb',
+                     borderRadius: 9, fontSize: 13, minHeight: 90, lineHeight: 1.7 }} />
+        </div>
+
+        {/* Meta */}
+        {(ed.publisher || ed.publishedDate || ed.isbn) && (
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 18, lineHeight: 1.8 }}>
+            {ed.publisher && <span>{ed.publisher}　</span>}
+            {ed.publishedDate && <span>{ed.publishedDate}年　</span>}
+            {ed.isbn && <span>ISBN: {ed.isbn}</span>}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={del}
+            style={{ padding: '10px 14px', border: '1.5px solid #fca5a5', background: 'white',
+                     color: '#ef4444', borderRadius: 9, cursor: 'pointer', fontSize: 13 }}>
+            削除
+          </button>
+          <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>キャンセル</button>
+          <button className="btn-primary" style={{ flex: 2 }} onClick={save}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────
+
+function App() {
+  const [books, setBooks] = useLocalStorage('dokkan-v1', []);
+  const [dragOverCol, setDragOverCol] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [fetchingCovers, setFetchingCovers] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState(null);
+  const [viewMode, setViewMode] = useState('kanban');       // 'kanban' | 'genre'
+  const [filterGenre, setFilterGenre] = useState(null);     // null = すべて
+  const [expandedSeries, setExpandedSeries] = useState({}); // {シリーズ名: bool}
+
+  const { useEffect } = React;
+
+  // 既存のAmazonカバーURLを高解像度に自動アップグレード（初回のみ）
+  useEffect(() => {
+    setBooks(prev => prev.map(b => {
+      const upgraded = b.cover && b.cover.includes('media-amazon') && /_S[XY]\d+_/.test(b.cover)
+        ? { ...b, cover: b.cover.replace(/_S[XY]\d+_/g, '_SY500_') } : b;
+      // ジャンルが未設定の本は自動判定
+      return upgraded.genre ? upgraded : { ...upgraded, genre: detectGenre(upgraded.title) };
+    }));
+  }, []); // eslint-disable-line
+
+  // 仮置きカードの自動同期（実本のステータスが変わるたびに再計算）
+  const realBooksSig = books.filter(b => !b.isPlaceholder).map(b => `${b.id}:${b.status}`).join(',');
+  useEffect(() => {
+    setBooks(prev => {
+      const realBooks = prev.filter(b => !b.isPlaceholder);
+      const suggestions = findPlaceholderSuggestions(prev);
+      const suggestedTitles = new Set(suggestions.map(s => s.title));
+      const keepOld = prev.filter(b => b.isPlaceholder && suggestedTitles.has(b.title));
+      const existingTitles = new Set(keepOld.map(b => b.title));
+      const newOnes = suggestions.filter(s => !existingTitles.has(s.title));
+      if (newOnes.length === 0 && keepOld.length === prev.filter(b => b.isPlaceholder).length) return prev;
+      return [...newOnes, ...keepOld, ...realBooks];
+    });
+  }, [realBooksSig]); // eslint-disable-line
+
+  const handleToggleSeries = (name) =>
+    setExpandedSeries(prev => ({ ...prev, [name]: !prev[name] }));
+
+  // 次の巻サジェスト
+  const [dismissedSuggestions, setDismissedSuggestions] = useState([]);
+  const nextVolSuggestions = findNextVolumeSuggestions(books)
+    .filter(s => !dismissedSuggestions.includes(s.book.id));
+
+  const handleMoveNextOne = (bookId) => {
+    setBooks(prev => prev.map(b => b.id === bookId ? { ...b, status: '欲読' } : b));
+    setDismissedSuggestions(prev => [...prev, bookId]);
+  };
+  const handleMoveNextAll = () => {
+    const ids = nextVolSuggestions.map(s => s.book.id);
+    setBooks(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: '欲読' } : b));
+    setDismissedSuggestions(prev => [...prev, ...ids]);
+  };
+  const handleDismissSuggestions = () =>
+    setDismissedSuggestions(prev => [...prev, ...nextVolSuggestions.map(s => s.book.id)]);
+
+  // 表紙を持っていない本を全部まとめて取得（Google Books + OpenBD）
+  const handleFetchAllCovers = async () => {
+    const targets = books.filter(b => !b.cover);
+    if (targets.length === 0) { alert('すべての本に表紙が設定済みです！'); return; }
+    setFetchingCovers(true);
+    setFetchProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      const book = targets[i];
+      try {
+        const cover = await fetchCoverUrl(book.title, book.author);
+        if (cover) {
+          setBooks(prev => prev.map(b => b.id === book.id ? { ...b, cover } : b));
+        }
+      } catch(e) {}
+      setFetchProgress({ done: i + 1, total: targets.length });
+      await new Promise(r => setTimeout(r, 250));
+    }
+    setFetchingCovers(false);
+    setFetchProgress(null);
+  };
+
+  const handleDrop = (bookId, newStatus) => {
+    setBooks(prev => prev.map(b => b.id === bookId ? { ...b, status: newStatus } : b));
+    setDragOverCol(null);
+  };
+
+  const handleAdd = (book) => setBooks(prev => [book, ...prev]);
+
+  const handleImport = (newBooks) => {
+    // 既存の本のカバーを更新しつつ、新規のみ追加する
+    let coverUpdated = 0;
+    setBooks(prev => {
+      const existingMap = new Map(prev.map(b => [b.title.trim(), b]));
+      const fresh = [];
+      newBooks.forEach(nb => {
+        const existing = existingMap.get(nb.title.trim());
+        if (existing) {
+          // 既存本にカバーがなく新しいデータにカバーがあれば更新
+          if (!existing.cover && nb.cover) {
+            existingMap.set(nb.title.trim(), { ...existing, cover: nb.cover });
+            coverUpdated++;
+          }
+        } else {
+          fresh.push(nb);
+        }
+      });
+      return [...fresh, ...Array.from(existingMap.values())];
+    });
+    setTimeout(() => {
+      const msgs = [];
+      const freshCount = newBooks.filter(nb => !books.some(b => b.title.trim() === nb.title.trim())).length;
+      if (freshCount > 0) msgs.push(`${freshCount}冊を新規追加`);
+      if (coverUpdated > 0) msgs.push(`${coverUpdated}冊の表紙を更新`);
+      const skipped = newBooks.length - freshCount - coverUpdated;
+      if (skipped > 0) msgs.push(`${skipped}冊はスキップ`);
+      if (msgs.length > 0) alert(msgs.join('、') + 'しました。');
+    }, 100);
+    // インポート後に表紙を自動取得（Google Books + OpenBD）
+    fresh.forEach((book, i) => {
+      setTimeout(async () => {
+        const cover = await fetchCoverUrl(book.title, book.author);
+        if (cover) setBooks(prev => prev.map(b => b.id === book.id ? { ...b, cover } : b));
+      }, i * 300);
+    });
+  };
+
+  const handleUpdate = (updated) => setBooks(prev => prev.map(b => b.id === updated.id ? updated : b));
+  const handleDelete = (id) => setBooks(prev => prev.filter(b => b.id !== id));
+
+  const handleMoveUp = (bookId) => {
+    setBooks(prev => {
+      const book = prev.find(b => b.id === bookId);
+      if (!book) return prev;
+      const colBooks = prev.filter(b => b.status === book.status);
+      const colIdx = colBooks.findIndex(b => b.id === bookId);
+      if (colIdx <= 0) return prev;
+      const target = colBooks[colIdx - 1];
+      const posA = prev.findIndex(b => b.id === bookId);
+      const posB = prev.findIndex(b => b.id === target.id);
+      const result = [...prev];
+      [result[posA], result[posB]] = [result[posB], result[posA]];
+      return result;
+    });
+  };
+
+  const handleMoveDown = (bookId) => {
+    setBooks(prev => {
+      const book = prev.find(b => b.id === bookId);
+      if (!book) return prev;
+      const colBooks = prev.filter(b => b.status === book.status);
+      const colIdx = colBooks.findIndex(b => b.id === bookId);
+      if (colIdx >= colBooks.length - 1) return prev;
+      const target = colBooks[colIdx + 1];
+      const posA = prev.findIndex(b => b.id === bookId);
+      const posB = prev.findIndex(b => b.id === target.id);
+      const result = [...prev];
+      [result[posA], result[posB]] = [result[posB], result[posA]];
+      return result;
+    });
+  };
+
+  // カード上へのドロップによる並び替え（列間移動も対応）
+  const handleReorder = (draggedId, targetId, position) => {
+    setBooks(prev => {
+      const dragged = prev.find(b => b.id === draggedId);
+      const target = prev.find(b => b.id === targetId);
+      if (!dragged || !target || draggedId === targetId) return prev;
+      const without = prev.filter(b => b.id !== draggedId);
+      const updated = { ...dragged, status: target.status }; // 列をまたぐ場合はステータスも更新
+      const targetPos = without.findIndex(b => b.id === targetId);
+      const insertAt = position === 'after' ? targetPos + 1 : targetPos;
+      const result = [...without];
+      result.splice(insertAt, 0, updated);
+      return result;
+    });
+  };
+
+  const total = books.length;
+  const done = books.filter(b => b.status === '読完').length;
+  const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      {/* ── HEADER ── */}
+      <div style={{ background: 'white', borderBottom: '1px solid #f0ede8',
+                    padding: '0 20px', height: 64, display: 'flex', alignItems: 'center',
+                    gap: 14, position: 'sticky', top: 0, zIndex: 100,
+                    boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+        <div style={{ fontWeight: 900, fontSize: 20, letterSpacing: '-0.5px', flexShrink: 0 }}>
+          どっかん
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#9ca3af', marginLeft: 4 }}>（読完）</span>
+        </div>
+
+        {/* Progress */}
+        {total > 0 && (
+          <div style={{ flex: 1, maxWidth: 200 }}>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>
+              読完 {done}/{total}冊 ({progress}%)
+            </div>
+            <div className="progress-bar-bg">
+              <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
+          {/* Cover fetch progress */}
+          {fetchingCovers && fetchProgress && (
+            <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #818cf8',
+                             borderTopColor: 'transparent', borderRadius: '50%',
+                             animation: 'spin 0.8s linear infinite' }} />
+              {fetchProgress.done}/{fetchProgress.total}冊取得中…
+            </div>
+          )}
+          {!fetchingCovers && books.some(b => !b.cover) && (
+            <button onClick={handleFetchAllCovers}
+              style={{ padding: '8px 14px', background: 'white', color: '#059669',
+                       border: '1.5px solid #A7F3D0', borderRadius: 9, cursor: 'pointer',
+                       fontWeight: 600, fontSize: 13 }}>
+              📸 表紙を取得
+            </button>
+          )}
+          <button onClick={() => setShowImport(true)}
+            style={{ padding: '8px 15px', background: 'white', color: '#7C3AED',
+                     border: '1.5px solid #DDD6FE', borderRadius: 9, cursor: 'pointer',
+                     fontWeight: 600, fontSize: 13 }}>
+            📱 Kindleから取り込む
+          </button>
+          <button className="btn-primary" style={{ padding: '8px 15px' }}
+            onClick={() => setShowAdd(true)}>
+            ＋ 本を追加
+          </button>
+          {books.length > 0 && (
+            <button
+              onClick={() => { if (window.confirm('全データを削除しますか？この操作は元に戻せません。')) { setBooks([]); } }}
+              style={{ padding: '8px 12px', background: 'white', color: '#ef4444',
+                       border: '1.5px solid #fca5a5', borderRadius: 9, cursor: 'pointer',
+                       fontSize: 13, fontWeight: 600 }}
+              title="全データをリセット">
+              🗑️
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── フィルターバー ── */}
+      {books.length > 0 && (
+        <FilterBar books={books} filterGenre={filterGenre}
+          onFilter={setFilterGenre} viewMode={viewMode} onViewMode={setViewMode} />
+      )}
+
+      {/* ── 次の巻サジェストバナー ── */}
+      <NextVolumeBanner
+        suggestions={nextVolSuggestions}
+        onMoveOne={handleMoveNextOne}
+        onMoveAll={handleMoveNextAll}
+        onDismiss={handleDismissSuggestions}
+      />
+
+      {/* ── 表紙取得バナー ── */}
+      {!fetchingCovers && books.length > 0 && books.some(b => !b.cover) && (
+        <div style={{ background: '#EEF2FF', borderBottom: '1px solid #C7D2FE',
+                      padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, color: '#4338CA' }}>
+            📸 表紙がない本が {books.filter(b=>!b.cover).length}冊あります
+          </span>
+          <button onClick={handleFetchAllCovers}
+            style={{ padding: '6px 16px', background: '#6366f1', color: 'white',
+                     border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            一括取得する
+          </button>
+        </div>
+      )}
+      {fetchingCovers && fetchProgress && (
+        <div style={{ background: '#EEF2FF', borderBottom: '1px solid #C7D2FE',
+                      padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ display: 'inline-block', width: 14, height: 14,
+                         border: '2px solid #6366f1', borderTopColor: 'transparent',
+                         borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <span style={{ fontSize: 13, color: '#4338CA' }}>
+            表紙を取得中… {fetchProgress.done}/{fetchProgress.total}冊
+          </span>
+          <div style={{ flex: 1, maxWidth: 200, height: 4, background: '#C7D2FE', borderRadius: 99 }}>
+            <div style={{ height: '100%', background: '#6366f1', borderRadius: 99,
+                          width: `${Math.round(fetchProgress.done/fetchProgress.total*100)}%`,
+                          transition: 'width 0.3s' }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── KANBAN VIEW ── */}
+      {viewMode === 'kanban' && (
+        <div className="kanban-scroll">
+          {COLS.map(cfg => {
+            const colBooks = books
+              .filter(b => b.status === cfg.key)
+              .filter(b => !filterGenre || b.genre === filterGenre);
+            return (
+              <KanbanColumn key={cfg.key} cfg={cfg}
+                books={colBooks}
+                isDragOver={dragOverCol === cfg.key}
+                onDragOver={setDragOverCol}
+                onDragLeave={() => setDragOverCol(null)}
+                onDrop={handleDrop}
+                onDragStart={() => {}}
+                onDragEnd={() => setDragOverCol(null)}
+                onBookClick={setDetail}
+                onMoveUp={handleMoveUp}
+                onMoveDown={handleMoveDown}
+                onDelete={handleDelete}
+                onReorder={handleReorder}
+                expandedSeries={expandedSeries}
+                onToggleSeries={handleToggleSeries}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── GENRE VIEW ── */}
+      {viewMode === 'genre' && (
+        <GenreView
+          books={books}
+          filterGenre={filterGenre}
+          expandedSeries={expandedSeries}
+          onToggleSeries={handleToggleSeries}
+          onBookClick={setDetail}
+          onMoveUp={handleMoveUp}
+          onMoveDown={handleMoveDown}
+          onDelete={handleDelete}
+          onReorder={handleReorder}
+        />
+      )}
+
+      {/* ── EMPTY STATE ── */}
+      {books.length === 0 && (
+        <div style={{ position: 'fixed', top: '50%', left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      textAlign: 'center', pointerEvents: 'none' }}>
+          <div style={{ fontSize: 72, marginBottom: 12 }}>📚</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#374151', marginBottom: 8 }}>
+            読書管理をはじめよう
+          </div>
+          <div style={{ fontSize: 14, color: '#9ca3af', lineHeight: 1.7 }}>
+            右上のボタンで本を追加するか、<br />Amazonの購入履歴を一括取り込みできます
+          </div>
+        </div>
+      )}
+
+      {/* ── MODALS ── */}
+      {showAdd && <AddBookModal onClose={() => setShowAdd(false)} onAdd={handleAdd} />}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {detail && (
+        <BookDetailModal book={detail} onClose={() => setDetail(null)}
+          onUpdate={u => { handleUpdate(u); setDetail(null); }}
+          onDelete={handleDelete} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
